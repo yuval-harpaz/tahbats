@@ -3,195 +3,196 @@
 <head>
 <meta charset="utf-8" />
 <title>GTFS Route Search Map</title>
-
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-
 <style>
   body { margin:0; font-family:sans-serif; }
   #controls {
     padding:10px;
     background:#f0f0f0;
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:8px;
   }
-  #search {
-    width:500px;
-    max-width:90%;
+  .step {
+    display:flex;
+    align-items:center;
+    gap:6px;
   }
+  .step label { font-weight:bold; font-size:0.9em; color:#555; }
+  .step input { width:180px; }
+  #step2 { opacity:0.4; pointer-events:none; transition:opacity 0.2s; }
+  #step2.active { opacity:1; pointer-events:all; }
   #status {
-    margin-left:10px;
+    flex:1;
+    min-width:200px;
+    font-size:0.85em;
+    color:#333;
   }
-  #map {
-    height:90vh;
-    width:100%;
-  }
+  #map { height:calc(100vh - 52px); width:100%; }
 </style>
 </head>
 <body>
-
 <div id="controls">
-  <input id="search" placeholder="Line number(s), e.g. 1 or 1,277,405" />
-  <button id="go">Search</button>
-  <span id="status">Loading routes.txt...</span>
+  <div class="step" id="step1">
+    <label>① Line:</label>
+    <input id="search-line" placeholder="e.g. 277" />
+    <button id="go-line">Search</button>
+  </div>
+  <div class="step" id="step2">
+    <label>② Filter by stop:</label>
+    <input id="search-stop" placeholder="e.g. רחובות" />
+    <button id="go-stop">Filter &amp; Draw</button>
+    <button id="draw-all">Draw All</button>
+  </div>
+  <span id="status">Loading routes…</span>
 </div>
-
 <div id="map"></div>
-
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
 <script>
-const GTFS_ZIP =
-  "https://gtfs.mot.gov.il/gtfsfiles/israel-public-transportation.zip";
-
-const API_BASE =
-  "https://open-bus-stride-api.hasadna.org.il/route_timetable/list?line_refs=";
+const API_BASE = "https://open-bus-stride-api.hasadna.org.il/route_timetable/list?line_refs=";
 
 const map = L.map("map").setView([31.87, 34.81], 11);
-
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-}).addTo(map);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19 }).addTo(map);
 
 let layers = [];
 let routes = [];
+// After step 1: { lineRefs, ridesData, groups }
+let currentData = null;
 
-function clearLayers() {
-  layers.forEach(l => map.removeLayer(l));
-  layers = [];
+function setStatus(msg) { document.getElementById("status").textContent = msg; }
+
+function clearLayers() { layers.forEach(l => map.removeLayer(l)); layers = []; }
+
+function normalize(str) {
+  return (str || "")
+    .replace(/[\u0591-\u05C7]/g, "")
+    .replace(/[\u200F\u200E\u202A-\u202E]/g, "")
+    .trim();
+}
+
+function parseCsvLine(line) {
+  const result = []; let current = ""; let inQuotes = false;
+  for (const ch of line) {
+    if (ch === '"') { inQuotes = !inQuotes; }
+    else if (ch === ',' && !inQuotes) { result.push(current); current = ""; }
+    else { current += ch; }
+  }
+  result.push(current);
+  return result;
 }
 
 function groupByRide(data) {
   const groups = {};
   for (const p of data) {
-    const id = p.gtfs_ride_id;
-    if (!groups[id]) groups[id] = [];
-    groups[id].push(p);
+    if (!groups[p.gtfs_ride_id]) groups[p.gtfs_ride_id] = [];
+    groups[p.gtfs_ride_id].push(p);
   }
   return groups;
 }
 
-function drawRide(points) {
-  points.sort(
-    (a, b) =>
-      new Date(a.planned_arrival_time) -
-      new Date(b.planned_arrival_time)
-  );
+const COLORS = ["#1a6eff","#e63946","#2a9d8f","#e9c46a","#f4a261","#8338ec","#06d6a0","#ff6b6b"];
+let colorIdx = 0;
+function nextColor() { return COLORS[(colorIdx++) % COLORS.length]; }
 
-  const latlngs = points.map(p => [p.lat, p.lon]);
-
-  const line = L.polyline(latlngs, {
-    color: "blue",
-    weight: 4,
-    opacity: 0.7
-  }).addTo(map);
-
-  layers.push(line);
-
-  for (const p of points) {
-    const marker = L.circleMarker([p.lat, p.lon], { radius: 5 })
-      .bindPopup(
-        `<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`
-      )
-      .addTo(map);
-
-    layers.push(marker);
-  }
-}
-
-function parseCsvLine(line) {
-  const result = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-
-    if (ch === '"') {
-      inQuotes = !inQuotes;
-    } else if (ch === "," && !inQuotes) {
-      result.push(current);
-      current = "";
-    } else {
-      current += ch;
+function drawRides(groups) {
+  clearLayers();
+  colorIdx = 0;
+  for (const points of Object.values(groups)) {
+    points.sort((a,b) => new Date(a.planned_arrival_time) - new Date(b.planned_arrival_time));
+    const latlngs = points.map(p => [p.lat, p.lon]);
+    const color = nextColor();
+    const line = L.polyline(latlngs, { color, weight:4, opacity:0.7 }).addTo(map);
+    layers.push(line);
+    for (const p of points) {
+      const marker = L.circleMarker([p.lat, p.lon], { radius:5, color })
+        .bindPopup(`<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`)
+        .addTo(map);
+      layers.push(marker);
     }
   }
-
-  result.push(current);
-  return result;
+  if (layers.length) map.fitBounds(L.featureGroup(layers).getBounds(), { padding:[20,20] });
 }
 
 async function loadRoutes() {
-  const status = document.getElementById("status");
-
-  const res = await fetch(GTFS_ZIP);
-  const blob = await res.blob();
-
-  const zip = await JSZip.loadAsync(blob);
-  const text = await zip.file("routes.txt").async("string");
-
+  const res = await fetch("https://raw.githubusercontent.com/yuval-harpaz/tahbats/main/routes.txt");
+  if (!res.ok) { setStatus(`Failed to load routes.txt (${res.status})`); return; }
+  const text = await res.text();
   const lines = text.trim().split(/\r?\n/);
   const header = parseCsvLine(lines[0]);
-
   const routeIdIdx = header.indexOf("route_id");
-  const shortIdx = header.indexOf("route_short_name");
-  const longIdx = header.indexOf("route_long_name");
-
+  const shortIdx   = header.indexOf("route_short_name");
+  const longIdx    = header.indexOf("route_long_name");
   routes = lines.slice(1).map(line => {
     const cols = parseCsvLine(line);
-    return {
-      route_id: cols[routeIdIdx],
-      route_short_name: cols[shortIdx],
-      route_long_name: cols[longIdx]
-    };
+    return { route_id: cols[routeIdIdx], route_short_name: cols[shortIdx], route_long_name: cols[longIdx] };
   });
-
-  status.textContent =
-    `Loaded ${routes.length} routes. Enter one or more line numbers.`;
+  setStatus(`Loaded ${routes.length} routes. Enter a line number.`);
 }
 
-async function searchLines() {
-  const value = document.getElementById("search").value.trim();
-
+// Step 1: find matching route IDs by line number, fetch all their stops
+async function stepOne() {
+  const value = document.getElementById("search-line").value.trim();
   if (!value) return;
 
-  const requested = value
-    .split(",")
-    .map(x => x.trim())
-    .filter(Boolean);
+  // Support comma-separated line numbers too
+  const lineNums = value.split(/[\s,]+/).filter(Boolean);
+  const matched = routes.filter(r => lineNums.includes(r.route_short_name));
 
-  const matched = routes.filter(r =>
-    requested.includes(r.route_short_name)
-  );
-
-  if (!matched.length) {
-    alert("No matching lines found.");
-    return;
-  }
+  if (!matched.length) { alert("No routes found for that line number."); return; }
 
   const lineRefs = [...new Set(matched.map(r => r.route_id))];
-
-  document.getElementById("status").textContent =
-    `Found ${matched.length} route variants, querying ${lineRefs.length} route IDs`;
-
-  clearLayers();
+  setStatus(`Found ${matched.length} variants (${lineRefs.length} route IDs). Fetching stops…`);
 
   const res = await fetch(API_BASE + lineRefs.join(","));
   const data = await res.json();
-
   const groups = groupByRide(data);
+  const rideCount = Object.keys(groups).length;
 
-  Object.values(groups).forEach(drawRide);
+  currentData = { lineRefs, data, groups };
 
-  if (layers.length) {
-    const group = L.featureGroup(layers);
-    map.fitBounds(group.getBounds(), { padding: [20, 20] });
-  }
+  setStatus(`Got ${rideCount} rides. Optionally filter by stop name, or click Draw All.`);
+  document.getElementById("step2").classList.add("active");
+  clearLayers();
 }
 
-document.getElementById("go").addEventListener("click", searchLines);
+// Step 2a: filter rides to only those that pass through a stop matching the text
+function stepFilter() {
+  if (!currentData) return;
+  const raw = document.getElementById("search-stop").value.trim();
+  if (!raw) { drawRides(currentData.groups); return; }
 
-document.getElementById("search").addEventListener("keydown", e => {
-  if (e.key === "Enter") searchLines();
-});
+  const needle = normalize(raw);
+  const filtered = {};
+  for (const [rideId, points] of Object.entries(currentData.groups)) {
+    const passes = points.some(p =>
+      normalize(p.name).includes(needle) || normalize(p.city).includes(needle)
+    );
+    if (passes) filtered[rideId] = points;
+  }
+
+  if (!Object.keys(filtered).length) {
+    alert(`No rides pass through stops matching "${raw}".`);
+    return;
+  }
+  setStatus(`Showing ${Object.keys(filtered).length} rides passing through "${raw}".`);
+  drawRides(filtered);
+}
+
+// Step 2b: draw everything without stop filter
+function stepDrawAll() {
+  if (!currentData) return;
+  setStatus(`Showing all ${Object.keys(currentData.groups).length} rides.`);
+  drawRides(currentData.groups);
+}
+
+document.getElementById("go-line").addEventListener("click", stepOne);
+document.getElementById("search-line").addEventListener("keydown", e => { if (e.key==="Enter") stepOne(); });
+
+document.getElementById("go-stop").addEventListener("click", stepFilter);
+document.getElementById("search-stop").addEventListener("keydown", e => { if (e.key==="Enter") stepFilter(); });
+
+document.getElementById("draw-all").addEventListener("click", stepDrawAll);
 
 loadRoutes();
 </script>
