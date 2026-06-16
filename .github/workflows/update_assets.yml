@@ -1,3 +1,4 @@
+name: update assets
 on:
   workflow_dispatch:
   schedule:
