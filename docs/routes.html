@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>GTFS Route Search Map</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+<style>
+  body { margin:0; font-family:sans-serif; }
+  #controls {
+    padding:10px;
+    background:#f0f0f0;
+  }
+  #search {
+    width:500px;
+    max-width:90%;
+  }
+  #status {
+    margin-left:10px;
+  }
+  #map {
+    height:90vh;
+    width:100%;
+  }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <input id="search" placeholder="Line number(s), e.g. 1 or 1,277,405" />
+  <button id="go">Search</button>
+  <span id="status">Loading routes.txt...</span>
+</div>
+
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<script>
+const GTFS_ZIP =
+  "https://gtfs.mot.gov.il/gtfsfiles/israel-public-transportation.zip";
+
+const API_BASE =
+  "https://open-bus-stride-api.hasadna.org.il/route_timetable/list?line_refs=";
+
+const map = L.map("map").setView([31.87, 34.81], 11);
+
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+}).addTo(map);
+
+let layers = [];
+let routes = [];
+
+function clearLayers() {
+  layers.forEach(l => map.removeLayer(l));
+  layers = [];
+}
+
+function groupByRide(data) {
+  const groups = {};
+  for (const p of data) {
+    const id = p.gtfs_ride_id;
+    if (!groups[id]) groups[id] = [];
+    groups[id].push(p);
+  }
+  return groups;
+}
+
+function drawRide(points) {
+  points.sort(
+    (a, b) =>
+      new Date(a.planned_arrival_time) -
+      new Date(b.planned_arrival_time)
+  );
+
+  const latlngs = points.map(p => [p.lat, p.lon]);
+
+  const line = L.polyline(latlngs, {
+    color: "blue",
+    weight: 4,
+    opacity: 0.7
+  }).addTo(map);
+
+  layers.push(line);
+
+  for (const p of points) {
+    const marker = L.circleMarker([p.lat, p.lon], { radius: 5 })
+      .bindPopup(
+        `<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`
+      )
+      .addTo(map);
+
+    layers.push(marker);
+  }
+}
+
+function parseCsvLine(line) {
+  const result = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+
+  result.push(current);
+  return result;
+}
+
+async function loadRoutes() {
+  const status = document.getElementById("status");
+
+  const res = await fetch(GTFS_ZIP);
+  const blob = await res.blob();
+
+  const zip = await JSZip.loadAsync(blob);
+  const text = await zip.file("routes.txt").async("string");
+
+  const lines = text.trim().split(/\r?\n/);
+  const header = parseCsvLine(lines[0]);
+
+  const routeIdIdx = header.indexOf("route_id");
+  const shortIdx = header.indexOf("route_short_name");
+  const longIdx = header.indexOf("route_long_name");
+
+  routes = lines.slice(1).map(line => {
+    const cols = parseCsvLine(line);
+    return {
+      route_id: cols[routeIdIdx],
+      route_short_name: cols[shortIdx],
+      route_long_name: cols[longIdx]
+    };
+  });
+
+  status.textContent =
+    `Loaded ${routes.length} routes. Enter one or more line numbers.`;
+}
+
+async function searchLines() {
+  const value = document.getElementById("search").value.trim();
+
+  if (!value) return;
+
+  const requested = value
+    .split(",")
+    .map(x => x.trim())
+    .filter(Boolean);
+
+  const matched = routes.filter(r =>
+    requested.includes(r.route_short_name)
+  );
+
+  if (!matched.length) {
+    alert("No matching lines found.");
+    return;
+  }
+
+  const lineRefs = [...new Set(matched.map(r => r.route_id))];
+
+  document.getElementById("status").textContent =
+    `Found ${matched.length} route variants, querying ${lineRefs.length} route IDs`;
+
+  clearLayers();
+
+  const res = await fetch(API_BASE + lineRefs.join(","));
+  const data = await res.json();
+
+  const groups = groupByRide(data);
+
+  Object.values(groups).forEach(drawRide);
+
+  if (layers.length) {
+    const group = L.featureGroup(layers);
+    map.fitBounds(group.getBounds(), { padding: [20, 20] });
+  }
+}
+
+document.getElementById("go").addEventListener("click", searchLines);
+
+document.getElementById("search").addEventListener("keydown", e => {
+  if (e.key === "Enter") searchLines();
+});
+
+loadRoutes();
+</script>
+</body>
+</html>

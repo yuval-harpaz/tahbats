@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Line 277 Live Map</title>
+
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    #map {
+      height: 95vh;
+      width: 100%;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const API =
+      "https://open-bus-stride-api.hasadna.org.il/route_timetable/list?line_refs=11537";
+
+    const map = L.map("map").setView([31.87, 34.81], 11);
+
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+    }).addTo(map);
+
+    let layers = [];
+
+    function clearLayers() {
+      layers.forEach((l) => map.removeLayer(l));
+      layers = [];
+    }
+
+    function groupByRide(data) {
+      const groups = {};
+      for (const p of data) {
+        const id = p.gtfs_ride_id;
+        if (!groups[id]) groups[id] = [];
+        groups[id].push(p);
+      }
+      return groups;
+    }
+
+    function drawRide(points) {
+      // sort by time
+      points.sort(
+        (a, b) =>
+          new Date(a.planned_arrival_time) -
+          new Date(b.planned_arrival_time)
+      );
+
+      const latlngs = points.map((p) => [p.lat, p.lon]);
+
+      // polyline
+      const line = L.polyline(latlngs, {
+        color: "blue",
+        weight: 4,
+        opacity: 0.7,
+      }).addTo(map);
+
+      layers.push(line);
+
+      // markers
+      for (const p of points) {
+        const marker = L.circleMarker([p.lat, p.lon], {
+          radius: 5,
+        })
+          .bindPopup(
+            `<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`
+          )
+          .addTo(map);
+
+        layers.push(marker);
+      }
+    }
+
+    async function load() {
+      clearLayers();
+
+      const res = await fetch(API);
+      const data = await res.json();
+
+      const groups = groupByRide(data);
+
+      Object.values(groups).forEach(drawRide);
+    }
+
+    load();
+
+    // refresh every 30 seconds
+    setInterval(load, 30000);
+  </script>
+</body>
+</html>
