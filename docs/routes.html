@@ -7,44 +7,30 @@
 <style>
   body { margin:0; font-family:sans-serif; }
   #controls {
-    padding:10px;
+    padding:8px 10px;
     background:#f0f0f0;
     display:flex;
     flex-wrap:wrap;
     align-items:center;
     gap:8px;
   }
-  .step {
-    display:flex;
-    align-items:center;
-    gap:6px;
+  #search-line { width:140px; }
+  #search-stop { width:220px; opacity:0.4; transition:opacity 0.2s; }
+  #search-stop.active { opacity:1; }
+  #search-btn { display:none; }
+  #status { flex:1; min-width:160px; font-size:0.85em; color:#333; }
+  #map { height:calc(100vh - 48px); width:100%; }
+
+  @media (max-width: 600px) {
+    #search-btn { display:inline-block; }
   }
-  .step label { font-weight:bold; font-size:0.9em; color:#555; }
-  .step input { width:180px; }
-  #step2 { opacity:0.4; pointer-events:none; transition:opacity 0.2s; }
-  #step2.active { opacity:1; pointer-events:all; }
-  #status {
-    flex:1;
-    min-width:200px;
-    font-size:0.85em;
-    color:#333;
-  }
-  #map { height:calc(100vh - 52px); width:100%; }
 </style>
 </head>
 <body>
 <div id="controls">
-  <div class="step" id="step1">
-    <label>① Line:</label>
-    <input id="search-line" placeholder="e.g. 277" />
-    <button id="go-line">Search</button>
-  </div>
-  <div class="step" id="step2">
-    <label>② Filter by stop:</label>
-    <input id="search-stop" placeholder="e.g. רחובות" />
-    <button id="go-stop">Filter &amp; Draw</button>
-    <button id="draw-all">Draw All</button>
-  </div>
+  <input id="search-line" placeholder="Line, e.g. 277" />
+  <input id="search-stop" placeholder="Filter by stop, e.g. רחובות" disabled />
+  <button id="search-btn">Search</button>
   <span id="status">Loading routes…</span>
 </div>
 <div id="map"></div>
@@ -57,11 +43,9 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { maxZoom:19 }
 
 let layers = [];
 let routes = [];
-// After step 1: { lineRefs, ridesData, groups }
-let currentData = null;
+let currentGroups = null;
 
 function setStatus(msg) { document.getElementById("status").textContent = msg; }
-
 function clearLayers() { layers.forEach(l => map.removeLayer(l)); layers = []; }
 
 function normalize(str) {
@@ -92,23 +76,20 @@ function groupByRide(data) {
 }
 
 const COLORS = ["#1a6eff","#e63946","#2a9d8f","#e9c46a","#f4a261","#8338ec","#06d6a0","#ff6b6b"];
-let colorIdx = 0;
-function nextColor() { return COLORS[(colorIdx++) % COLORS.length]; }
 
 function drawRides(groups) {
   clearLayers();
-  colorIdx = 0;
+  let colorIdx = 0;
   for (const points of Object.values(groups)) {
     points.sort((a,b) => new Date(a.planned_arrival_time) - new Date(b.planned_arrival_time));
-    const latlngs = points.map(p => [p.lat, p.lon]);
-    const color = nextColor();
-    const line = L.polyline(latlngs, { color, weight:4, opacity:0.7 }).addTo(map);
-    layers.push(line);
+    const color = COLORS[(colorIdx++) % COLORS.length];
+    layers.push(L.polyline(points.map(p => [p.lat, p.lon]), { color, weight:4, opacity:0.7 }).addTo(map));
     for (const p of points) {
-      const marker = L.circleMarker([p.lat, p.lon], { radius:5, color })
-        .bindPopup(`<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`)
-        .addTo(map);
-      layers.push(marker);
+      layers.push(
+        L.circleMarker([p.lat, p.lon], { radius:5, color })
+          .bindPopup(`<b>${p.name}</b><br>${p.city}<br>${p.planned_arrival_time}`)
+          .addTo(map)
+      );
     }
   }
   if (layers.length) map.fitBounds(L.featureGroup(layers).getBounds(), { padding:[20,20] });
@@ -130,46 +111,44 @@ async function loadRoutes() {
   setStatus(`Loaded ${routes.length} routes. Enter a line number.`);
 }
 
-// Step 1: find matching route IDs by line number, fetch all their stops
-async function stepOne() {
+async function fetchLine() {
   const value = document.getElementById("search-line").value.trim();
   if (!value) return;
 
-  // Support comma-separated line numbers too
   const lineNums = value.split(/[\s,]+/).filter(Boolean);
   const matched = routes.filter(r => lineNums.includes(r.route_short_name));
-
   if (!matched.length) { alert("No routes found for that line number."); return; }
 
   const lineRefs = [...new Set(matched.map(r => r.route_id))];
-  setStatus(`Found ${matched.length} variants (${lineRefs.length} route IDs). Fetching stops…`);
+  setStatus(`Found ${matched.length} variants. Fetching stops…`);
 
   const res = await fetch(API_BASE + lineRefs.join(","));
   const data = await res.json();
-  const groups = groupByRide(data);
-  const rideCount = Object.keys(groups).length;
+  currentGroups = groupByRide(data);
 
-  currentData = { lineRefs, data, groups };
+  const stopInput = document.getElementById("search-stop");
+  stopInput.disabled = false;
+  stopInput.classList.add("active");
 
-  setStatus(`Got ${rideCount} rides. Optionally filter by stop name, or click Draw All.`);
-  document.getElementById("step2").classList.add("active");
-  clearLayers();
+  setStatus(`Got ${Object.keys(currentGroups).length} rides. Optionally filter by stop name.`);
+  applyStopFilter();
 }
 
-// Step 2a: filter rides to only those that pass through a stop matching the text
-function stepFilter() {
-  if (!currentData) return;
-  const raw = document.getElementById("search-stop").value.trim();
-  if (!raw) { drawRides(currentData.groups); return; }
+function applyStopFilter() {
+  if (!currentGroups) return;
+  const raw = normalize(document.getElementById("search-stop").value.trim());
 
-  const needle = normalize(raw);
-  const filtered = {};
-  for (const [rideId, points] of Object.entries(currentData.groups)) {
-    const passes = points.some(p =>
-      normalize(p.name).includes(needle) || normalize(p.city).includes(needle)
-    );
-    if (passes) filtered[rideId] = points;
+  if (!raw) {
+    drawRides(currentGroups);
+    setStatus(`Showing all ${Object.keys(currentGroups).length} rides.`);
+    return;
   }
+
+  const filtered = Object.fromEntries(
+    Object.entries(currentGroups).filter(([, points]) =>
+      points.some(p => normalize(p.name).includes(raw) || normalize(p.city).includes(raw))
+    )
+  );
 
   if (!Object.keys(filtered).length) {
     alert(`No rides pass through stops matching "${raw}".`);
@@ -179,20 +158,25 @@ function stepFilter() {
   drawRides(filtered);
 }
 
-// Step 2b: draw everything without stop filter
-function stepDrawAll() {
-  if (!currentData) return;
-  setStatus(`Showing all ${Object.keys(currentData.groups).length} rides.`);
-  drawRides(currentData.groups);
-}
+// Line input: trigger fetch on Enter, Tab, or blur (leaving the field)
+const lineInput = document.getElementById("search-line");
+lineInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); fetchLine(); }
+});
+lineInput.addEventListener("blur", () => fetchLine());
 
-document.getElementById("go-line").addEventListener("click", stepOne);
-document.getElementById("search-line").addEventListener("keydown", e => { if (e.key==="Enter") stepOne(); });
+// Stop input: filter on Enter, Tab, or blur
+const stopInput = document.getElementById("search-stop");
+stopInput.addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); applyStopFilter(); }
+});
+stopInput.addEventListener("blur", () => applyStopFilter());
 
-document.getElementById("go-stop").addEventListener("click", stepFilter);
-document.getElementById("search-stop").addEventListener("keydown", e => { if (e.key==="Enter") stepFilter(); });
-
-document.getElementById("draw-all").addEventListener("click", stepDrawAll);
+// Mobile search button triggers whichever step is relevant
+document.getElementById("search-btn").addEventListener("click", () => {
+  if (!currentGroups) fetchLine();
+  else applyStopFilter();
+});
 
 loadRoutes();
 </script>
