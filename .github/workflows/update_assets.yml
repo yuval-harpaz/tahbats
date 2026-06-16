@@ -1,12 +1,14 @@
 name: update assets
+
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 */6 * *'
+    - cron: '0 */6 * * *'
 
 jobs:
   update:
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
@@ -18,5 +20,8 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add routes.txt
-          git commit -m "update routes" || true
-          git push
+
+          if ! git diff --cached --quiet; then
+            git commit -m "update routes"
+            git push
+          fi
