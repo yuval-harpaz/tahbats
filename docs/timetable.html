@@ -1,0 +1,1209 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Israel Transit Timetable & Map Tracker 🗺️</title>
+    
+    <!-- Google Fonts: Inter for premium typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --primary-light: rgba(79, 70, 229, 0.1);
+            --accent: #f97316;
+            --accent-hover: #ea580c;
+            --dark: #0f172a;
+            --gray-light: #f8fafc;
+            --gray-border: #e2e8f0;
+            --text-main: #334155;
+            --text-muted: #64748b;
+            --sidebar-width: 380px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            font-size: 15px;
+            color: var(--text-main);
+            background-color: var(--gray-light);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Header Styling */
+        header {
+            background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%);
+            color: #ffffff;
+            padding: 12px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            z-index: 100;
+            height: 60px;
+        }
+
+        .header-title-area {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .header-title-area h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+
+        .header-title-area .badge {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            border: 1px solid rgba(255, 255, 255, 0.25);
+        }
+
+        .header-meta {
+            font-size: 0.85rem;
+            color: rgba(255, 255, 255, 0.7);
+            font-weight: 500;
+        }
+
+        /* App Layout Workspace */
+        #workspace {
+            display: flex;
+            flex: 1;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Map and Controls container */
+        #map-container {
+            flex: 1;
+            position: relative;
+            height: 100%;
+        }
+
+        #map {
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Floating Controls Over Map */
+        #controls-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 10;
+            width: 340px;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 16px;
+            padding: 16px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .control-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            position: relative;
+        }
+
+        .control-group label {
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .input-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 12px;
+            color: var(--text-muted);
+            pointer-events: none;
+            font-size: 1.1rem;
+        }
+
+        #controls-panel input, 
+        #controls-panel select {
+            width: 100%;
+            padding: 10px 12px 10px 36px;
+            font-size: 0.95rem;
+            font-family: inherit;
+            border: 1px solid var(--gray-border);
+            border-radius: 10px;
+            background-color: #ffffff;
+            color: var(--text-main);
+            transition: all 0.2s ease;
+        }
+
+        #controls-panel input:focus, 
+        #controls-panel select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-light);
+        }
+
+        #controls-panel select {
+            padding-left: 12px; /* Select dropdown doesn't need icon padding */
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2364748b' stroke-width='2'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 12px center;
+            background-size: 16px;
+            padding-right: 36px;
+        }
+
+        /* Suggestions Autocomplete List */
+        #suggestions-list {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #ffffff;
+            border: 1px solid var(--gray-border);
+            border-radius: 10px;
+            margin-top: 4px;
+            max-height: 220px;
+            overflow-y: auto;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+            display: none;
+            z-index: 1000;
+        }
+
+        .suggestion-item {
+            padding: 10px 14px;
+            cursor: pointer;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            border-bottom: 1px solid #f1f5f9;
+            transition: background 0.15s ease;
+        }
+
+        .suggestion-item:last-child {
+            border-bottom: none;
+        }
+
+        .suggestion-item:hover {
+            background-color: var(--gray-light);
+        }
+
+        .suggestion-item .sugg-name {
+            font-weight: 600;
+            color: var(--dark);
+        }
+
+        .suggestion-item .sugg-city {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .suggestion-item.no-match {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 16px;
+            cursor: default;
+        }
+
+        /* Status Banner */
+        #status-banner {
+            font-size: 0.8rem;
+            padding: 8px 12px;
+            border-radius: 8px;
+            background: #f1f5f9;
+            color: var(--text-muted);
+            line-height: 1.4;
+            border-left: 3px solid var(--text-muted);
+        }
+
+        #status-banner.success {
+            background: #ecfdf5;
+            color: #065f46;
+            border-left-color: #059669;
+        }
+
+        #status-banner.loading {
+            background: #eff6ff;
+            color: #1e40af;
+            border-left-color: #2563eb;
+        }
+
+        /* Sidebar Timetable panel styling */
+        #sidebar {
+            width: var(--sidebar-width);
+            background: #ffffff;
+            border-left: 1px solid var(--gray-border);
+            display: flex;
+            flex-direction: column;
+            z-index: 10;
+            overflow: hidden;
+            box-shadow: -4px 0 20px rgba(0, 0, 0, 0.03);
+        }
+
+        #sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Sidebar Empty Placeholder */
+        .sidebar-placeholder {
+            margin: auto;
+            text-align: center;
+            color: var(--text-muted);
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .placeholder-icon {
+            font-size: 3.5rem;
+            opacity: 0.8;
+            animation: bounce 2s infinite;
+        }
+
+        .sidebar-placeholder h3 {
+            color: var(--dark);
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .sidebar-placeholder p {
+            font-size: 0.85rem;
+            line-height: 1.5;
+            max-width: 240px;
+        }
+
+        /* Stop Info Card */
+        .stop-info-card {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            background: var(--gray-light);
+            padding: 14px 16px;
+            border-radius: 12px;
+            border: 1px solid var(--gray-border);
+        }
+
+        .stop-header-icon {
+            font-size: 1.5rem;
+            background: #ffffff;
+            width: 42px;
+            height: 42px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 10px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+        }
+
+        .stop-header-details h3 {
+            font-size: 1rem;
+            font-weight: 700;
+            color: var(--dark);
+            line-height: 1.3;
+        }
+
+        .stop-header-details p {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        /* Next Bus Highlights Card */
+        .next-bus-card {
+            background: linear-gradient(135deg, var(--primary) 0%, #3b82f6 100%);
+            color: #ffffff;
+            border-radius: 16px;
+            padding: 20px;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(79, 70, 229, 0.25);
+        }
+
+        .card-glow {
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            background: rgba(255, 255, 255, 0.15);
+            border-radius: 50%;
+            top: -50px;
+            right: -50px;
+            filter: blur(20px);
+        }
+
+        .card-header {
+            font-size: 0.75rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            opacity: 0.8;
+            margin-bottom: 6px;
+        }
+
+        .card-time {
+            font-size: 2.25rem;
+            font-weight: 800;
+            letter-spacing: -0.03em;
+            line-height: 1;
+            margin-bottom: 8px;
+        }
+
+        .card-countdown {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 10px;
+            border-radius: 9999px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #4ade80;
+            border-radius: 50%;
+            display: inline-block;
+            box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+            animation: pulse-ring 1.5s infinite;
+        }
+
+        .card-footer {
+            margin-top: 14px;
+            font-size: 0.75rem;
+            opacity: 0.8;
+            border-top: 1px solid rgba(255, 255, 255, 0.2);
+            padding-top: 10px;
+        }
+
+        .no-more-buses {
+            background: #fffbeb;
+            color: #b45309;
+            border: 1px solid #fde68a;
+            border-radius: 12px;
+            padding: 14px;
+            text-align: center;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+
+        /* Departure Timeline Styling */
+        .timeline-title {
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--text-muted);
+            letter-spacing: 0.08em;
+            border-bottom: 1px solid var(--gray-border);
+            padding-bottom: 8px;
+            margin-top: 8px;
+        }
+
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .timeline-item {
+            display: flex;
+            position: relative;
+            padding-bottom: 18px;
+            gap: 16px;
+        }
+
+        .timeline-item:last-child {
+            padding-bottom: 0;
+        }
+
+        .timeline-line {
+            position: absolute;
+            left: 7px;
+            top: 18px;
+            bottom: 0;
+            width: 2px;
+            background-color: var(--gray-border);
+            z-index: 1;
+        }
+
+        .timeline-item:last-child .timeline-line {
+            display: none;
+        }
+
+        .timeline-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background-color: #ffffff;
+            border: 3px solid var(--gray-border);
+            z-index: 2;
+            margin-top: 2px;
+            transition: all 0.2s ease;
+        }
+
+        .timeline-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .time-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dep-time {
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: var(--dark);
+        }
+
+        .status-badge {
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 6px;
+        }
+
+        .ride-detail {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        /* Timeline States */
+        .timeline-item.past .timeline-dot {
+            border-color: #cbd5e1;
+            background-color: #f1f5f9;
+        }
+
+        .timeline-item.past .dep-time {
+            color: var(--text-muted);
+            text-decoration: line-through;
+            opacity: 0.8;
+        }
+
+        .timeline-item.past .status-badge {
+            background-color: #f1f5f9;
+            color: #64748b;
+        }
+
+        .timeline-item.upcoming .timeline-dot {
+            border-color: var(--primary);
+        }
+
+        .timeline-item.upcoming .status-badge {
+            background-color: var(--primary-light);
+            color: var(--primary);
+        }
+
+        .timeline-item.next .timeline-dot {
+            border-color: #10b981;
+            background-color: #10b981;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+        }
+
+        .timeline-item.next .status-badge {
+            background-color: #d1fae5;
+            color: #065f46;
+            font-weight: 700;
+            animation: pulse-glow 1.5s infinite;
+        }
+
+        .timeline-item.next .dep-time {
+            color: #047857;
+            font-weight: 800;
+        }
+
+        /* Animations */
+        @keyframes pulse-ring {
+            0% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(74, 222, 128, 0.7);
+            }
+            70% {
+                transform: scale(1);
+                box-shadow: 0 0 0 6px rgba(74, 222, 128, 0);
+            }
+            100% {
+                transform: scale(0.95);
+                box-shadow: 0 0 0 0 rgba(74, 222, 128, 0);
+            }
+        }
+
+        @keyframes pulse-glow {
+            0% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+            }
+            70% {
+                box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+            }
+            100% {
+                box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+            }
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-6px);
+            }
+        }
+
+        /* Leaflet Marker Styling */
+        .selected-marker {
+            stroke: #ffffff;
+            stroke-width: 3px;
+            filter: drop-shadow(0px 4px 6px rgba(0, 0, 0, 0.2));
+        }
+
+        /* Responsive Styles */
+        @media (max-width: 900px) {
+            #workspace {
+                flex-direction: column;
+            }
+
+            #sidebar {
+                width: 100%;
+                height: 320px;
+                border-left: none;
+                border-top: 1px solid var(--gray-border);
+            }
+
+            #controls-panel {
+                top: 10px;
+                left: 10px;
+                right: 10px;
+                width: auto;
+                padding: 12px;
+                flex-direction: row;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 8px;
+            }
+
+            .control-group {
+                flex: 1;
+                min-width: 140px;
+            }
+
+            #status-banner {
+                width: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="header-title-area">
+            <h1>Israel Transit Timetable & Map Tracker</h1>
+            <span class="badge">Stride API Live</span>
+        </div>
+        <div class="header-meta" id="header-date">Loading date...</div>
+    </header>
+
+    <div id="workspace">
+        <div id="map-container">
+            <div id="map"></div>
+            
+            <!-- Floating Controls Panel -->
+            <div id="controls-panel">
+                <div class="control-group">
+                    <label for="search-line">Line Number</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🚌</span>
+                        <input id="search-line" placeholder="e.g. 277 or 115" autocomplete="off" />
+                    </div>
+                </div>
+
+                <div class="control-group" id="variant-container" style="display: none;">
+                    <label for="variant-select">Route Variation</label>
+                    <select id="variant-select">
+                        <option value="" disabled selected>-- Choose variant --</option>
+                    </select>
+                </div>
+
+                <div class="control-group">
+                    <label for="search-stop">Search Stop</label>
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔍</span>
+                        <input id="search-stop" placeholder="Type to filter..." disabled autocomplete="off" />
+                    </div>
+                    <div id="suggestions-list"></div>
+                </div>
+
+                <div id="status-banner">Enter a line number above.</div>
+            </div>
+        </div>
+
+        <!-- Right Timetable Sidebar -->
+        <div id="sidebar">
+            <div id="sidebar-content">
+                <div class="sidebar-placeholder">
+                    <div class="placeholder-icon">🗺️</div>
+                    <h3>No Stop Selected</h3>
+                    <p>Enter a line number, choose a variation, and click a stop on the map or search to view departure times.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Leaflet Library JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // Set header date in Israel time
+        const todayStrIsrael = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'Asia/Jerusalem',
+            weekday: 'short',
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+        }).format(new Date());
+        document.getElementById("header-date").textContent = todayStrIsrael;
+
+        // Leaflet Map Initialization
+        // Centered roughly on Israel center
+        const map = L.map("map", {
+            zoomControl: false // We will rely on manual placement or can add it at bottom-right
+        }).setView([31.95, 34.85], 10);
+        
+        // Add zoom control to bottom right instead of top-left (to not clash with our controls)
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // Premium clean CartoDB Light map tiles
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+            maxZoom: 20,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CartoDB</a>'
+        }).addTo(map);
+
+        // State variables
+        let layers = [];
+        let uniqueStops = [];
+        let currentTimetable = [];
+        let selectedStopKey = null;
+        
+        // Get today's date in Israel (Asia/Jerusalem) timezone
+        const getIsraelDateString = (d = new Date()) => {
+            return new Intl.DateTimeFormat('en-CA', { 
+                timeZone: 'Asia/Jerusalem', 
+                year: 'numeric', 
+                month: '2-digit', 
+                day: '2-digit' 
+            }).format(d);
+        };
+
+        const todayDate = getIsraelDateString();
+
+        // Dynamically compute the current timezone offset string of Asia/Jerusalem
+        function getIsraelOffset() {
+            try {
+                const parts = new Intl.DateTimeFormat('en-US', {
+                    timeZone: 'Asia/Jerusalem',
+                    timeZoneName: 'longOffset'
+                }).formatToParts(new Date());
+                const tzName = parts.find(p => p.type === 'timeZoneName').value;
+                const match = tzName.match(/GMT([+-]\d+)(?::(\d+))?/);
+                if (match) {
+                    const sign = match[1].startsWith('-') ? '-' : '+';
+                    const hours = Math.abs(parseInt(match[1], 10)).toString().padStart(2, '0');
+                    const mins = match[2] ? match[2].padStart(2, '0') : '00';
+                    return `${sign}${hours}:${mins}`;
+                }
+            } catch (e) {
+                console.error("Error formatting timezone name, fallback to seasonal lookup", e);
+            }
+            const month = new Date().getMonth();
+            return (month >= 2 && month <= 9) ? '+03:00' : '+02:00';
+        }
+
+        const israelOffset = getIsraelOffset();
+
+        // Helper to format UTC isoString to HH:MM in Israel Time
+        function formatLocalTime(isoString) {
+            if (!isoString) return "--:--";
+            return new Intl.DateTimeFormat('en-US', {
+                timeZone: 'Asia/Jerusalem',
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit'
+            }).format(new Date(isoString));
+        }
+
+        // Status banner updates
+        function setStatus(msg, type = "") {
+            const banner = document.getElementById("status-banner");
+            banner.textContent = msg;
+            banner.className = "";
+            if (type) {
+                banner.classList.add(type);
+            }
+        }
+
+        // Reset map drawings
+        function clearLayers() {
+            layers.forEach(l => map.removeLayer(l));
+            layers = [];
+        }
+
+        // String normalization for Hebrew searches
+        function normalize(str) {
+            return (str || "")
+                .replace(/[\u0591-\u05C7]/g, "")
+                .replace(/[\u200F\u200E\u202A-\u202E]/g, "")
+                .trim();
+        }
+
+        // Search for lines
+        async function searchLine() {
+            const value = document.getElementById("search-line").value.trim();
+            if (!value) return;
+
+            setStatus("Searching route variants...", "loading");
+            document.getElementById("variant-container").style.display = "none";
+            document.getElementById("search-stop").disabled = true;
+            document.getElementById("search-stop").value = "";
+            clearLayers();
+            clearSidebar();
+
+            const url = `https://open-bus-stride-api.hasadna.org.il/gtfs_routes/list?route_short_name=${encodeURIComponent(value)}&date_from=${todayDate}&date_to=${todayDate}`;
+            
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const routes = await res.json();
+                
+                if (!routes || routes.length === 0) {
+                    setStatus("No active route variants found for today.", "error");
+                    return;
+                }
+
+                // Filter out duplicate line refs
+                const uniqueRoutes = [];
+                const seenRefs = new Set();
+                routes.forEach(r => {
+                    if (!seenRefs.has(r.line_ref)) {
+                        seenRefs.add(r.line_ref);
+                        uniqueRoutes.push(r);
+                    }
+                });
+
+                populateVariantDropdown(uniqueRoutes);
+                setStatus(`Found ${uniqueRoutes.length} route variation(s).`, "success");
+            } catch (e) {
+                setStatus(`Search failed: ${e.message}`, "error");
+                console.error(e);
+            }
+        }
+
+        // Populate dropdown
+        function populateVariantDropdown(routes) {
+            const container = document.getElementById("variant-container");
+            const select = document.getElementById("variant-select");
+            select.innerHTML = '<option value="" disabled selected>-- Select a route variant --</option>';
+
+            routes.forEach(r => {
+                const directionSymbol = r.route_direction === '1' ? '➡️' : r.route_direction === '2' ? '⬅️' : '🔄';
+                const operator = r.agency_name || "Unknown Operator";
+                const label = `${operator} [${directionSymbol}] ${r.route_long_name}`;
+                
+                const opt = document.createElement("option");
+                opt.value = r.line_ref;
+                opt.textContent = label;
+                select.appendChild(opt);
+            });
+
+            container.style.display = "block";
+
+            // If there's only one variant, auto select it
+            if (routes.length === 1) {
+                select.selectedIndex = 1;
+                fetchTimetable(routes[0].line_ref);
+            }
+        }
+
+        // Fetch timetable data
+        async function fetchTimetable(lineRef) {
+            setStatus("Loading timetable stops & times...", "loading");
+            clearLayers();
+            clearSidebar();
+            
+            const timeFrom = `${todayDate}T00:00:00${israelOffset}`;
+            const timeTo = `${todayDate}T23:59:59${israelOffset}`;
+            const url = `https://open-bus-stride-api.hasadna.org.il/route_timetable/list?line_refs=${lineRef}&planned_start_time_date_from=${encodeURIComponent(timeFrom)}&planned_start_time_date_to=${encodeURIComponent(timeTo)}&limit=1000`;
+
+            try {
+                const res = await fetch(url);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+
+                if (!data || data.length === 0) {
+                    setStatus("No rides scheduled for this route today.", "error");
+                    return;
+                }
+
+                currentTimetable = data;
+                processTimetableAndDraw(data);
+                setStatus("Select a stop on the map or type to filter.", "success");
+            } catch (e) {
+                setStatus(`Timetable error: ${e.message}`, "error");
+                console.error(e);
+            }
+        }
+
+        // Process stops & draw polylines/markers
+        function processTimetableAndDraw(data) {
+            const rides = {};
+            data.forEach(p => {
+                if (!rides[p.gtfs_ride_id]) rides[p.gtfs_ride_id] = [];
+                rides[p.gtfs_ride_id].push(p);
+            });
+
+            // Sort each ride chronologically
+            Object.values(rides).forEach(points => {
+                points.sort((a, b) => new Date(a.planned_arrival_time) - new Date(b.planned_arrival_time));
+            });
+
+            // Find canonical ride (longest ride)
+            let canonicalRide = [];
+            let maxStops = 0;
+            Object.values(rides).forEach(points => {
+                if (points.length > maxStops) {
+                    maxStops = points.length;
+                    canonicalRide = points;
+                }
+            });
+
+            // Extract unique stops
+            const stopsMap = new Map();
+            data.forEach(p => {
+                const key = `${p.name}||${p.city}||${p.lat}||${p.lon}`;
+                if (!stopsMap.has(key)) {
+                    stopsMap.set(key, {
+                        key: key,
+                        name: p.name,
+                        city: p.city,
+                        lat: parseFloat(p.lat),
+                        lon: parseFloat(p.lon)
+                    });
+                }
+            });
+            uniqueStops = Array.from(stopsMap.values());
+
+            // Enable stop searching
+            const stopInput = document.getElementById("search-stop");
+            stopInput.disabled = false;
+            stopInput.placeholder = `Filter ${uniqueStops.length} stops...`;
+
+            // Draw canonical route polyline
+            if (canonicalRide.length > 0) {
+                const latlngs = canonicalRide.map(p => [p.lat, p.lon]);
+                // Main route path
+                const poly = L.polyline(latlngs, {
+                    color: "#4f46e5",
+                    weight: 6,
+                    opacity: 0.85
+                }).addTo(map);
+                layers.push(poly);
+            }
+
+            // Draw markers for all stops
+            uniqueStops.forEach(stop => {
+                const marker = L.circleMarker([stop.lat, stop.lon], {
+                    radius: 7,
+                    fillColor: "#ffffff",
+                    fillOpacity: 1,
+                    color: "#4f46e5",
+                    weight: 3
+                });
+
+                marker.bindTooltip(`<b>${stop.name}</b><br>${stop.city}`, {
+                    direction: 'top',
+                    offset: [0, -5]
+                });
+
+                marker.on("click", () => {
+                    selectStop(stop.key);
+                });
+
+                marker.addTo(map);
+                stop.marker = marker;
+                layers.push(marker);
+            });
+
+            // Fit map zoom
+            if (layers.length > 0) {
+                map.fitBounds(L.featureGroup(layers).getBounds(), { padding: [40, 40] });
+            }
+        }
+
+        // Selection of a stop
+        function selectStop(stopKey) {
+            const stop = uniqueStops.find(s => s.key === stopKey);
+            if (!stop) return;
+
+            selectedStopKey = stopKey;
+            document.getElementById("search-stop").value = stop.name;
+            document.getElementById("suggestions-list").style.display = "none";
+
+            // Update marker styles to highlight selection
+            uniqueStops.forEach(s => {
+                if (s.marker) {
+                    if (s.key === stopKey) {
+                        s.marker.setStyle({
+                            radius: 10,
+                            fillColor: "#f97316",
+                            color: "#ffffff",
+                            weight: 3
+                        });
+                        s.marker.bringToFront();
+                    } else {
+                        s.marker.setStyle({
+                            radius: 7,
+                            fillColor: "#ffffff",
+                            color: "#4f46e5",
+                            weight: 3
+                        });
+                    }
+                }
+            });
+
+            // Smoothly center map to selected stop
+            map.setView([stop.lat, stop.lon], Math.max(map.getZoom(), 14));
+
+            // Show departures in sidebar
+            renderDepartures(stop);
+        }
+
+        // Render departures feed in the sidebar
+        function renderDepartures(stop) {
+            const sidebar = document.getElementById("sidebar-content");
+            
+            // Filter timetable entries for selected stop
+            const stopTimes = currentTimetable.filter(p => {
+                const key = `${p.name}||${p.city}||${p.lat}||${p.lon}`;
+                return key === stop.key;
+            });
+
+            // Sort chronologically
+            stopTimes.sort((a, b) => new Date(a.planned_arrival_time) - new Date(b.planned_arrival_time));
+
+            if (stopTimes.length === 0) {
+                sidebar.innerHTML = `
+                    <div class="sidebar-placeholder">
+                        <div class="placeholder-icon">⚠️</div>
+                        <h3>No departures</h3>
+                        <p>No planned times found for this stop today.</p>
+                    </div>`;
+                return;
+            }
+
+            const now = new Date();
+            const formatted = stopTimes.map(item => {
+                const arrival = new Date(item.planned_arrival_time);
+                const diffMs = arrival - now;
+                const diffMins = Math.round(diffMs / 60000);
+                const isPast = diffMs < 0;
+
+                return {
+                    rideId: item.gtfs_ride_id,
+                    time: formatLocalTime(item.planned_arrival_time),
+                    startTime: formatLocalTime(item.gtfs_line_start_time),
+                    isPast: isPast,
+                    diffMins: diffMins
+                };
+            });
+
+            // Find next departure
+            const next = formatted.find(d => !d.isPast);
+
+            // Output sidebar HTML
+            let html = `
+                <div class="stop-info-card">
+                    <div class="stop-header-icon">📍</div>
+                    <div class="stop-header-details">
+                        <h3>${stop.name}</h3>
+                        <p>${stop.city}</p>
+                    </div>
+                </div>
+            `;
+
+            if (next) {
+                const countdownText = next.diffMins === 0 
+                    ? "Arriving now" 
+                    : next.diffMins === 1 
+                        ? "in 1 minute" 
+                        : `in ${next.diffMins} minutes`;
+
+                html += `
+                    <div class="next-bus-card">
+                        <div class="card-glow"></div>
+                        <div class="card-header">NEXT DEPARTURE</div>
+                        <div class="card-time">${next.time}</div>
+                        <div class="card-countdown">
+                            <span class="pulse-dot"></span>
+                            ${countdownText}
+                        </div>
+                        <div class="card-footer">Starts at ${next.startTime} • Ride #${next.rideId}</div>
+                    </div>
+                `;
+            } else {
+                html += `
+                    <div class="no-more-buses">
+                        🏁 No more departures scheduled for today.
+                    </div>
+                `;
+            }
+
+            html += `<div class="timeline-title">TODAY'S SCHEDULE</div>`;
+            html += `<div class="timeline">`;
+
+            formatted.forEach(d => {
+                let statusClass = "upcoming";
+                let statusLabel = `in ${d.diffMins}m`;
+
+                if (d.isPast) {
+                    statusClass = "past";
+                    statusLabel = "Passed";
+                } else if (next && d.rideId === next.rideId) {
+                    statusClass = "next";
+                    statusLabel = d.diffMins === 0 ? "Now" : `in ${d.diffMins}m`;
+                }
+
+                html += `
+                    <div class="timeline-item ${statusClass}">
+                        <div class="timeline-line"></div>
+                        <div class="timeline-dot"></div>
+                        <div class="timeline-content">
+                            <div class="time-header">
+                                <span class="dep-time">${d.time}</span>
+                                <span class="status-badge">${statusLabel}</span>
+                            </div>
+                            <div class="ride-detail">Ride #${d.rideId} • Trip start: ${d.startTime}</div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += `</div>`;
+            sidebar.innerHTML = html;
+        }
+
+        // Clear sidebar content
+        function clearSidebar() {
+            const sidebar = document.getElementById("sidebar-content");
+            sidebar.innerHTML = `
+                <div class="sidebar-placeholder">
+                    <div class="placeholder-icon">🗺️</div>
+                    <h3>No Stop Selected</h3>
+                    <p>Enter a line number, choose a variation, and click a stop on the map or search to view departure times.</p>
+                </div>`;
+            selectedStopKey = null;
+        }
+
+        // Event Listeners: Line input
+        const lineInput = document.getElementById("search-line");
+        lineInput.addEventListener("keydown", e => {
+            if (e.key === "Enter" || e.key === "Tab") {
+                e.preventDefault();
+                searchLine();
+            }
+        });
+
+        // Event Listeners: Route dropdown selection
+        document.getElementById("variant-select").addEventListener("change", (e) => {
+            const lineRef = e.target.value;
+            if (lineRef) {
+                fetchTimetable(lineRef);
+            }
+        });
+
+        // Event Listeners: Stop search suggestions
+        const stopInput = document.getElementById("search-stop");
+        const suggestionsList = document.getElementById("suggestions-list");
+
+        stopInput.addEventListener("input", () => {
+            const raw = normalize(stopInput.value.trim().toLowerCase());
+            if (!raw) {
+                suggestionsList.style.display = "none";
+                return;
+            }
+
+            const matches = uniqueStops.filter(stop => 
+                normalize(stop.name).toLowerCase().includes(raw) || 
+                normalize(stop.city).toLowerCase().includes(raw)
+            );
+
+            if (matches.length === 0) {
+                suggestionsList.innerHTML = '<div class="suggestion-item no-match">No matching stops</div>';
+                suggestionsList.style.display = "block";
+                return;
+            }
+
+            suggestionsList.innerHTML = "";
+            matches.slice(0, 10).forEach(stop => {
+                const item = document.createElement("div");
+                item.className = "suggestion-item";
+                item.innerHTML = `
+                    <span class="sugg-name">${stop.name}</span>
+                    <span class="sugg-city">${stop.city}</span>
+                `;
+                item.addEventListener("click", () => {
+                    selectStop(stop.key);
+                });
+                suggestionsList.appendChild(item);
+            });
+            suggestionsList.style.display = "block";
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener("click", (e) => {
+            if (e.target !== stopInput && e.target !== suggestionsList && !suggestionsList.contains(e.target)) {
+                suggestionsList.style.display = "none";
+            }
+        });
+    </script>
+</body>
+
+</html>
